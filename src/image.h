@@ -31,6 +31,7 @@ typedef struct {
 image get_image_from_stream(CvCapture *cap);
 int fill_image_from_stream(CvCapture *cap, image im);
 image ipl_to_image(IplImage* src);
+IplImage* image_to_ipl(image im);
 void ipl_into_image(IplImage* src, image im);
 void flush_stream_buffer(CvCapture *cap, int n);
 void show_image_cv(image p, const char *name, IplImage *disp);

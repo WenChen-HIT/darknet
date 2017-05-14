@@ -9,7 +9,9 @@
 #include "blas.h"
 
 static int coco_ids[] = {1,2,3,4,5,6,7,8,9,10,11,13,14,15,16,17,18,19,20,21,22,23,24,25,27,28,31,32,33,34,35,36,37,38,39,40,41,42,43,44,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,67,70,72,73,74,75,76,77,78,79,80,81,82,84,85,86,87,88,89,90};
-
+#ifdef OPENCV
+extern IplImage* image_to_ipl(image im);
+#endif
 void train_detector(char *datacfg, char *cfgfile, char *weightfile, int *gpus, int ngpus, int clear)
 {
     list *options = read_data_cfg(datacfg);
@@ -616,6 +618,8 @@ void test_detector(char *datacfg, char *cfgfile, char *weightfile, char *filenam
             if(!input) return;
             strtok(input, "\n");
         }
+
+        printf("input: %s", input);
         image im = load_image_color(input,0,0);
         image sized = letterbox_image(im, net.w, net.h);
         //image sized = resize_image(im, net.w, net.h);
@@ -662,16 +666,18 @@ void test_detector(char *datacfg, char *cfgfile, char *weightfile, char *filenam
 
 void run_detector(int argc, char **argv)
 {
-    char *prefix = find_char_arg(argc, argv, "-prefix", 0);
-    float thresh = find_float_arg(argc, argv, "-thresh", .24);
-    float hier_thresh = find_float_arg(argc, argv, "-hier", .5);
-    int cam_index = find_int_arg(argc, argv, "-c", 0);
+    char *prefix = find_char_arg(argc, argv, "-prefix", 0);         //
+    float thresh = find_float_arg(argc, argv, "-thresh", .24);      //thresh used for probability
+    float hier_thresh = find_float_arg(argc, argv, "-hier", .5);    //
+    int cam_index = find_int_arg(argc, argv, "-c", 0);              //
     int frame_skip = find_int_arg(argc, argv, "-s", 0);
-    int avg = find_int_arg(argc, argv, "-avg", 3);
+    int avg = find_int_arg(argc, argv, "-avg", 3);                  //avg?
     if(argc < 4){
         fprintf(stderr, "usage: %s %s [train/test/valid] [cfg] [weights (optional)]\n", argv[0], argv[1]);
         return;
     }
+
+    //config GPU
     char *gpu_list = find_char_arg(argc, argv, "-gpus", 0);
     char *outfile = find_char_arg(argc, argv, "-out", 0);
     int *gpus = 0;
@@ -719,3 +725,82 @@ void run_detector(int argc, char **argv)
         demo(cfg, weights, thresh, cam_index, filename, names, classes, frame_skip, prefix, avg, hier_thresh, width, height, fps, fullscreen);
     }
 }
+void run_detector_KF(int argc, char **argv)
+{
+    float thresh = find_float_arg(argc, argv, "-thresh", .3);
+    float hier_thresh = find_float_arg(argc, argv, "-hier", .5);
+    int fullscreen = find_arg(argc, argv, "-fullscreen");
+    char *outfile = find_char_arg(argc, argv, "-out", 0);
+    char *datacfg = argv[2];
+    char *netcfg = argv[3];
+    char *weights = (argc > 4) ? argv[4] : 0;
+    char *filelistfile = (argc > 5) ? argv[5]: 0;
+    list *options = read_data_cfg(datacfg);
+    char *name_list = option_find_str(options, "names", "data/names.list");
+    char **names = get_labels(name_list);
+
+    image **alphabet = load_alphabet();
+    network net = parse_network_cfg(netcfg);
+    if(weights){
+        load_weights(&net, weights);
+    }
+    set_batch_network(&net, 1);
+    srand(2222222);
+    clock_t time;
+
+    int j;
+    float nms = .4;
+
+    FILE *file = fopen(filelistfile, "r");
+    if(file == 0) file_error(filelistfile);
+
+    char line[256];
+
+#ifdef OPENCV
+    cvNamedWindow("predictions", CV_WINDOW_AUTOSIZE);//if changed with CV_WINDOW_NORMAL, can use mouse to resize window
+    CvSize size = cvSize(1241,376);
+    if(fullscreen){
+        cvSetWindowProperty("predictions", CV_WND_PROP_FULLSCREEN, CV_WINDOW_FULLSCREEN);
+    }
+    CvVideoWriter* videoWriter = cvCreateVideoWriter("test.avi", CV_FOURCC('M', 'J', 'P', 'G'), 30, size, 1);
+#endif
+    while(fgets(line, 256, file)){
+//        printf("%s\n", line);
+        int len = strlen(line);
+        if(line[len-1] == '\n') line[len-1] = NULL;
+        image im = load_image_color(line, 0, 0);
+
+        image sized = letterbox_image(im, net.w, net.h);
+        layer l = net.layers[net.n - 1];
+        box *boxes = calloc(l.w*l.h*l.n, sizeof(box));
+        float **probs = calloc(l.w*l.h*l.n, sizeof(float *));
+        for(j = 0; j < l.w*l.h*l.n; ++j) probs[j] = calloc(l.classes + 1, sizeof(float *));
+
+        float *X = sized.data;
+        time=clock();
+
+        network_predict(net, X);
+        printf("%s: Predicted in %f seconds.\n", line, sec(clock()-time));
+        get_region_boxes(l, im.w, im.h, net.w, net.h, thresh, probs, boxes, 0, 0, hier_thresh, 1);
+        if (nms) do_nms_obj(boxes, probs, l.w*l.h*l.n, l.classes, nms);
+        draw_detections(im, l.w*l.h*l.n, thresh, boxes, probs, names, alphabet, l.classes);
+#ifdef OPENCV
+        show_image(im, "predictions");
+        cvWaitKey(30);
+        IplImage* img = image_to_ipl(im);
+        cvWriteFrame(videoWriter,img);
+        cvReleaseImage(&img);
+#endif
+
+        free_image(im);
+        free_image(sized);
+        free(boxes);
+        free_ptrs((void **)probs, l.w*l.h*l.n);
+    }
+#ifdef OPENCV
+    cvReleaseVideoWriter(&videoWriter);
+    cvDestroyWindow("predictions");
+#endif
+    fclose(file);
+}
+
