@@ -15,7 +15,7 @@ extern IplImage* image_to_ipl(image im);
 void train_detector(char *datacfg, char *cfgfile, char *weightfile, int *gpus, int ngpus, int clear)
 {
     list *options = read_data_cfg(datacfg);
-    char *train_images = option_find_str(options, "train", "data/train.list");
+    char *train_images = option_find_str(options, "train", "data/voc/train.list");
     char *backup_directory = option_find_str(options, "backup", "/backup/");
 
     srand(time(0));
@@ -512,6 +512,97 @@ void validate_detector(char *datacfg, char *cfgfile, char *weightfile, char *out
     fprintf(stderr, "Total Detection Time: %f Seconds\n", (double)(time(0) - start));
 }
 
+void validate_detector_PRcurve(char *datacfg, char *cfgfile, char *weightfile)
+{
+    list *options = read_data_cfg(datacfg);
+    char *valid_images = option_find_str(options, "valid", "data/voc.2007.test");
+
+    network net = parse_network_cfg(cfgfile);
+    if(weightfile){
+        load_weights(&net, weightfile);
+    }
+    set_batch_network(&net, 1);
+    fprintf(stderr, "Learning Rate: %g, Momentum: %g, Decay: %g\n", net.learning_rate, net.momentum, net.decay);
+    srand(time(0));
+
+    list *plist = get_paths(valid_images);
+    char **paths = (char **)list_to_array(plist);
+
+    layer l = net.layers[net.n-1];
+    int classes = l.classes;
+
+    int j, k;
+    box *boxes = calloc(l.w*l.h*l.n, sizeof(box));
+    float **probs = calloc(l.w*l.h*l.n, sizeof(float *));
+    for(j = 0; j < l.w*l.h*l.n; ++j) probs[j] = calloc(classes+1, sizeof(float *));
+
+    int m = plist->size;
+    int i=0;
+
+    float iou_thresh = .5;
+    float nms = .4;
+    fprintf(stderr, "Thresh        Recall        Precision        \n");
+//    for(float thresh = 0.0; thresh < 1; thresh = thresh + 0.02){
+    float thresh = 0.40;
+    int total = 0;
+    int TP = 0, FP = 0;
+    int proposals = 0;
+    float avg_iou = 0;
+    clock_t time;
+    for(i = 0; i < m; ++i){
+//        fprintf(stderr, "valid - %d/%d\n", i, m);
+        char *path = paths[i];
+        image orig = load_image_color(path, 0, 0);
+        image sized = resize_image(orig, net.w, net.h);
+        char *id = basecfg(path);
+
+        time=clock();
+        network_predict(net, sized.data);
+//        fprintf(stderr,"%f\n", sec(clock()-time));
+
+        get_region_boxes(l, sized.w, sized.h, net.w, net.h, thresh, probs, boxes, 1, 0, .5, 1);
+        if (nms) do_nms(boxes, probs, l.w*l.h*l.n, 1, nms);
+
+        char labelpath[4096];
+        find_replace(path, "images", "labels", labelpath);
+        find_replace(labelpath, "JPEGImages", "labels", labelpath);
+        find_replace(labelpath, ".png", ".txt", labelpath);
+        find_replace(labelpath, ".jpg", ".txt", labelpath);
+        find_replace(labelpath, ".JPEG", ".txt", labelpath);
+
+        int num_labels = 0;
+        box_label *truth = read_boxes(labelpath, &num_labels);
+        for(k = 0; k < l.w*l.h*l.n; ++k){
+            if(probs[k][0] > thresh){
+            ++proposals;
+            }
+        }
+        for (j = 0; j < num_labels; ++j) {
+            ++total;
+            box t = {truth[j].x, truth[j].y, truth[j].w, truth[j].h};
+            float best_iou = 0;
+            for(k = 0; k < l.w*l.h*l.n; ++k){
+            float iou = box_iou(boxes[k], t);
+            if(probs[k][0] > thresh && iou > best_iou){
+                best_iou = iou;
+            }
+            }
+            avg_iou += best_iou;
+            if(best_iou > iou_thresh){
+            ++TP;
+            }
+        }
+        FP = proposals - TP;
+
+        free(id);
+        free_image(orig);
+        free_image(sized);
+    }
+    fprintf(stderr, "%.4f        %.2f        %.2f\n", thresh, 100.*TP/total, 100.*TP/(TP+FP));
+//    }
+}
+
+
 void validate_detector_recall(char *cfgfile, char *weightfile)
 {
     network net = parse_network_cfg(cfgfile);
@@ -522,7 +613,7 @@ void validate_detector_recall(char *cfgfile, char *weightfile)
     fprintf(stderr, "Learning Rate: %g, Momentum: %g, Decay: %g\n", net.learning_rate, net.momentum, net.decay);
     srand(time(0));
 
-    list *plist = get_paths("data/voc.2007.test");
+    list *plist = get_paths("data/voc/2007_test.txt");
     char **paths = (char **)list_to_array(plist);
 
     layer l = net.layers[net.n-1];
@@ -620,6 +711,7 @@ void test_detector(char *datacfg, char *cfgfile, char *weightfile, char *filenam
         }
 
         printf("input: %s", input);
+        time=clock();
         image im = load_image_color(input,0,0);
         image sized = letterbox_image(im, net.w, net.h);
         //image sized = resize_image(im, net.w, net.h);
@@ -633,7 +725,7 @@ void test_detector(char *datacfg, char *cfgfile, char *weightfile, char *filenam
         for(j = 0; j < l.w*l.h*l.n; ++j) probs[j] = calloc(l.classes + 1, sizeof(float *));
 
         float *X = sized.data;
-        time=clock();
+
         network_predict(net, X);
         printf("%s: Predicted in %f seconds.\n", input, sec(clock()-time));
         get_region_boxes(l, im.w, im.h, net.w, net.h, thresh, probs, boxes, 0, 0, hier_thresh, 1);
@@ -717,6 +809,7 @@ void run_detector(int argc, char **argv)
     else if(0==strcmp(argv[2], "valid")) validate_detector(datacfg, cfg, weights, outfile);
     else if(0==strcmp(argv[2], "valid2")) validate_detector_flip(datacfg, cfg, weights, outfile);
     else if(0==strcmp(argv[2], "recall")) validate_detector_recall(cfg, weights);
+    else if(0==strcmp(argv[2], "PRcurve")) validate_detector_PRcurve(datacfg, cfg, weights);
     else if(0==strcmp(argv[2], "demo")) {
         list *options = read_data_cfg(datacfg);
         int classes = option_find_int(options, "classes", 20);
@@ -758,11 +851,11 @@ void run_detector_KF(int argc, char **argv)
 
 #ifdef OPENCV
     cvNamedWindow("predictions", CV_WINDOW_AUTOSIZE);//if changed with CV_WINDOW_NORMAL, can use mouse to resize window
-    CvSize size = cvSize(1241,376);
+    CvSize size = cvSize(1280, 960);//1241,376
     if(fullscreen){
         cvSetWindowProperty("predictions", CV_WND_PROP_FULLSCREEN, CV_WINDOW_FULLSCREEN);
     }
-    CvVideoWriter* videoWriter = cvCreateVideoWriter("test.avi", CV_FOURCC('M', 'J', 'P', 'G'), 30, size, 1);
+    CvVideoWriter* videoWriter = cvCreateVideoWriter("test_robotcar.avi", CV_FOURCC('M', 'J', 'P', 'G'), 30, size, 1);
 #endif
     while(fgets(line, 256, file)){
 //        printf("%s\n", line);

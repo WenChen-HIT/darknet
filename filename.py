@@ -1,11 +1,14 @@
 # coding=utf-8
 import os
 import os.path
+import cv2
 
-rootdir = './data/00/image_0'
-output = open('./00imagefile.txt', 'w')
+# rootdir = './data/00/image_0'
+# output = open('./00imagefile.txt', 'w')
 # rootdir = './data/rgb'
 # output = open('./rgbimagefile.txt', 'w')
+rootdir = './data/robotcar'
+output = open('./00imagefile.txt', 'w')
 
 for parent, dirnames, filenames in os.walk(rootdir):
     for dirname in dirnames:
@@ -21,3 +24,4 @@ for parent, dirnames, filenames in os.walk(rootdir):
         output.write('\n')
 output.close()
 
+cv2.undistort()

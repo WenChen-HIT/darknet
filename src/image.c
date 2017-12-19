@@ -182,12 +182,12 @@ void draw_detections(image im, int num, float thresh, box *boxes, float **probs,
 
             int width = im.h * .012;
 
-            if(0){
+            if(1){
                 width = pow(prob, 1./2.)*10+1;
                 alphabet = 0;
             }
 
-            //printf("%d %s: %.0f%%\n", i, names[class], prob*100);
+//            printf("%d %s: %.0f%%\n", i, names[class], prob*100);
             printf("%s: %.0f%%\n", names[class], prob*100);
             int offset = class*123457 % classes;
             float red = get_color(2,offset,classes);

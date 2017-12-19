@@ -6,12 +6,13 @@
 #include "box.h"
 #include "demo.h"
 
-char *voc_names[] = {"aeroplane", "bicycle", "bird", "boat", "bottle", "bus", "car", "cat", "chair", "cow", "diningtable", "dog", "horse", "motorbike", "person", "pottedplant", "sheep", "sofa", "train", "tvmonitor"};
+//char *voc_names[] = {"aeroplane", "bicycle", "bird", "boat", "bottle", "bus", "car", "cat", "chair", "cow", "diningtable", "dog", "horse", "motorbike", "person", "pottedplant", "sheep", "sofa", "train", "tvmonitor"};
+char *voc_names[] = {"bicycle", "bus", "car", "dog", "motorbike", "person"};
 
 void train_yolo(char *cfgfile, char *weightfile)
 {
     char *train_images = "/data/voc/train.txt";
-    char *backup_directory = "/home/pjreddie/backup/";
+    char *backup_directory = "/home/wchen/darknet/backup/";
     srand(time(0));
     char *base = basecfg(cfgfile);
     printf("%s\n", base);
@@ -116,7 +117,7 @@ void validate_yolo(char *cfgfile, char *weightfile)
 
     char *base = "results/comp4_det_test_";
     //list *plist = get_paths("data/voc.2007.test");
-    list *plist = get_paths("/home/pjreddie/data/voc/2007_test.txt");
+    list *plist = get_paths("/home/wchen/darknet/data/voc/2007_test.txt");
     //list *plist = get_paths("data/voc.2012.test");
     char **paths = (char **)list_to_array(plist);
 
@@ -203,7 +204,7 @@ void validate_yolo_recall(char *cfgfile, char *weightfile)
     srand(time(0));
 
     char *base = "results/comp4_det_test_";
-    list *plist = get_paths("data/voc.2007.test");
+    list *plist = get_paths("data/voc/2007_test.txt");
     char **paths = (char **)list_to_array(plist);
 
     layer l = net.layers[net.n-1];
@@ -315,7 +316,7 @@ void test_yolo(char *cfgfile, char *weightfile, char *filename, float thresh)
         get_detection_boxes(l, 1, 1, thresh, probs, boxes, 0);
         if (nms) do_nms_sort(boxes, probs, l.side*l.side*l.n, l.classes, nms);
         //draw_detections(im, l.side*l.side*l.n, thresh, boxes, probs, voc_names, alphabet, 20);
-        draw_detections(im, l.side*l.side*l.n, thresh, boxes, probs, voc_names, alphabet, 20);
+        draw_detections(im, l.side*l.side*l.n, thresh, boxes, probs, voc_names, alphabet, 6);
         save_image(im, "predictions");
         show_image(im, "predictions");
 
@@ -348,5 +349,5 @@ void run_yolo(int argc, char **argv)
     else if(0==strcmp(argv[2], "train")) train_yolo(cfg, weights);
     else if(0==strcmp(argv[2], "valid")) validate_yolo(cfg, weights);
     else if(0==strcmp(argv[2], "recall")) validate_yolo_recall(cfg, weights);
-    else if(0==strcmp(argv[2], "demo")) demo(cfg, weights, thresh, cam_index, filename, voc_names, 20, frame_skip, prefix, avg, .5, 0,0,0,0);
+    else if(0==strcmp(argv[2], "demo")) demo(cfg, weights, thresh, cam_index, filename, voc_names, 6, frame_skip, prefix, avg, .5, 0,0,0,0);
 }
